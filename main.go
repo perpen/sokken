@@ -46,13 +46,9 @@ func run() error {
 	handleSignals()
 
 	if args[0] == "server" {
-		addr := args[1]
-		portArgs := args[2:]
-		localAddrs := make([]string, len(portArgs))
-		for i := range localAddrs {
-			localAddrs[i] = portArgs[i]
-		}
-		return runServer(addr, localAddrs)
+		listenAddr := args[1]
+		localAddrs := args[2:]
+		return runServer(listenAddr, localAddrs)
 	} else if args[0] == "client" {
 		args = args[1:]
 		if len(args)%2 != 0 {

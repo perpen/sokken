@@ -11,7 +11,7 @@ import (
 func runClients(clients []sokkenClient) error {
 	errc := make(chan error, 1) // used to detect issue with any client
 	for _, client := range clients {
-		log.Info().Msgf("proxying from %v to %v",
+		log.Info().Msgf("tunnelling %v to %v",
 			client.localAddr, client.remoteAddr)
 		go client.runClient(errc)
 	}
@@ -24,12 +24,13 @@ type sokkenClient struct {
 	remoteAddr string
 }
 
-// Listen on port, pipe connections to a remote websocket.
+// Listen on a local port, pipe connections to a remote websocket.
 // If fatal error, pushes it to channel.
 func (c sokkenClient) runClient(errc chan error) {
 	ln, err := net.Listen("tcp", c.localAddr)
 	if err != nil {
 		errc <- err
+		return
 	}
 	for {
 		local, err := ln.Accept()
@@ -45,7 +46,7 @@ func (c sokkenClient) handleConn(local net.Conn, remoteAddr string) {
 	localAddr := local.RemoteAddr().String()
 
 	logger := log.With().Str("local", localAddr).Str("remote", remoteAddr).Logger()
-	logger.Info().Msgf("proxy request")
+	logger.Info().Msgf("tunnel request")
 
 	ctx := context.Background()
 	remoteWs, _, err := websocket.Dial(ctx, remoteAddr, &websocket.DialOptions{

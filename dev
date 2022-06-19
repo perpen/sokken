@@ -27,9 +27,9 @@ client() {
         go run . \
         $SOKKEN_FLAGS \
 		client \
-        127.0.0.1:8000 ws://localhost:8001/proxy/127.0.0.1:$PORT \
-        127.0.0.1:7999 ws://localhost:8001/proxy/192.168.1.140:22 \
-        127.0.0.1:7998 ws://localhost:8001/proxy/github.com:443"
+        127.0.0.1:8000 ws://localhost:8001/tunnel/127.0.0.1:$PORT \
+        127.0.0.1:7999 ws://localhost:8001/tunnel/192.168.1.140:22 \
+        127.0.0.1:7998 ws://localhost:8001/tunnel/github.com:443"
 }
 
 suite() {

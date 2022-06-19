@@ -13,7 +13,7 @@ import (
 
 func ParseFlags() *zerolog.Logger {
 	debug := flag.Bool("log-debug", false, "sets log level to DEBUG rather than INFO")
-	pretty := flag.Bool("log-pretty", false, "logs to console, in non-json format - overrides log-file option")
+	pretty := flag.Bool("log-pretty", false, "logs to console, in colourful non-json format - overrides log-file option")
 	file := flag.String("log-file", "", "sets path of log file, if absent log to stderr")
 	maxSizeMb := flag.Int("log-max-size-mb", 10, "max file size before rotation")
 	maxAgeDays := flag.Int("log-max-age-days", 1, "max file age before rotation")

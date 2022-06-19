@@ -9,14 +9,14 @@ websockets).
 
 Start client on machine A:
 ```
-machine-a $ sokken client 127.0.0.1:2222 ws://machine-b:8000/proxy/127.0.0.1:22
-INF client listening on port 127.0.0.1:2222, proxying to ws://machine-b:8000/proxy/127.0.0.1:22
+machine-a $ sokken client 127.0.0.1:2222 ws://machine-b:8000/tunnel/127.0.0.1:22
+INF tunnelling 127.0.0.1:2222 to ws://machine-b:8000/tunnel/127.0.0.1:22
 ...
 ```
 Start server on machine B:
 ```
 machine-b $ sokken server :8000 127.0.0.1:22
-INF listening on :8000, forwarding to: [127.0.0.1:22]
+INF listening on :8000, tunnelling to: [127.0.0.1:22]
 ...
 ```
 Then from machine A you can invoke an ssh session on machine B:
@@ -50,7 +50,7 @@ Options:
   -log-max-size-mb int
         max file size before rotation (default 10)
   -log-pretty
-        logs to console, in non-json format - overrides log-file option
+        logs to console, in colourful non-json format - overrides log-file option
 
 # machine-b exposes 2 addresses: its own sshd, and github
 machine-b $ sokken server :8000 \
@@ -59,18 +59,18 @@ machine-b $ sokken server :8000 \
 
 # Port 2222 is only available from machine-a, since the sokken client
 # is listening on local interface
-machine-a $ sokken client 127.0.0.1:2222 ws://machine-b:8000/proxy/127.0.0.1:22
+machine-a $ sokken client 127.0.0.1:2222 ws://machine-b:8000/tunnel/127.0.0.1:22
 
 # Port 2222 is available from other machines, since the sokken client
 # is listening on all interfaces
-machine-a $ sokken client :2222 ws://machine-b:8000/proxy/127.0.0.1:22
+machine-a $ sokken client :2222 ws://machine-b:8000/tunnel/127.0.0.1:22
 
 # machine-b and machine-c run sokken servers, we can  access them both from
 # a single sokken client on machine-a
 machine-a $ sokken client \
-  127.0.0.1:2222 ws://machine-b:8000/proxy/127.0.0.1:22 \
-  127.0.0.1:8443 ws://machine-b:8000/proxy/github.com:443 \
-  127.0.0.1:8080 ws://machine-c:8000/proxy/127.0.0.1:8080
+  127.0.0.1:2222 ws://machine-b:8000/tunnel/127.0.0.1:22 \
+  127.0.0.1:8443 ws://machine-b:8000/tunnel/github.com:443 \
+  127.0.0.1:8080 ws://machine-c:8000/tunnel/127.0.0.1:8080
 ```
 
 ## Monitoring of server
@@ -87,7 +87,6 @@ $ curl http://machine-b:8000/health
 # FIXME
 
 - handle panics with structured logging
-- test log rotation
 - tls, ca for client
 - test through the d*p proxy, and our haproxy
 - log 'x-forwarded-for' ?

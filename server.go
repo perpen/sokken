@@ -26,7 +26,7 @@ type healthInfo struct {
 }
 
 func runServer(servingAddr string, localAddrs []string) error {
-	log.Info().Msgf("listening on %v, forwarding to: %v", servingAddr, localAddrs)
+	log.Info().Msgf("listening on %v, tunnelling to: %v", servingAddr, localAddrs)
 	log.Info().Msgf("max connections: %v", maxActiveConns)
 
 	s := &http.Server{
@@ -35,7 +35,7 @@ func runServer(servingAddr string, localAddrs []string) error {
 		WriteTimeout: time.Second * 2,
 	}
 
-	http.Handle("/proxy/", sokkenServer{
+	http.Handle("/tunnel/", sokkenServer{
 		log:         log.With().Logger(), // useful?
 		targetAddrs: localAddrs,
 	})
@@ -64,7 +64,7 @@ type sokkenServer struct {
 }
 
 func (s sokkenServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	reqTargetAddr := strings.TrimPrefix(r.URL.Path, "/proxy/")
+	reqTargetAddr := strings.TrimPrefix(r.URL.Path, "/tunnel/")
 	logger := s.log.With().
 		Str("target", reqTargetAddr).
 		Str("client", r.RemoteAddr).
