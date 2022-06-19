@@ -1,0 +1,76 @@
+#!/bin/bash
+# Requires commands entr and haproxy.
+#
+# Run in 4 windows:
+#   ./testing/test haproxy # used to test sokken through haproxy
+#   ./testing/test server
+#   ./testing/test client
+#   ./testing/test tester
+
+set -ueo pipefail
+
+source _functions
+
+CLIENT_ADDR=127.0.0.1:7999
+
+SERVER_ADDR=127.0.0.1:8000
+SERVER_HAPROXY_ADDR=127.0.0.1:8001
+
+SSH_ADDR=127.0.0.1:22
+SSH_ADDR_TUNNEL_HOST=127.0.0.1
+SSH_ADDR_TUNNEL_PORT=8002
+SSH_ADDR_TUNNEL=$SSH_ADDR_TUNNEL_HOST:$SSH_ADDR_TUNNEL_PORT
+
+# Access to the same tunnel, but via an haproxy
+SSH_HAPROXY_ADDR_TUNNEL_HOST=127.0.0.1
+SSH_HAPROXY_ADDR_TUNNEL_PORT=8003
+SSH_HAPROXY_ADDR_TUNNEL=$SSH_HAPROXY_ADDR_TUNNEL_HOST:$SSH_HAPROXY_ADDR_TUNNEL_PORT
+
+ENTR_FLAGS=-c # clear screen on restart
+SOKKEN_FLAGS="--log-pretty --log-debug"
+
+_watched() {
+    ls *.go */*.go
+}
+
+haproxy() {
+    ls testing/haproxy.conf | entr -c haproxy -f testing/haproxy.conf
+}
+
+server() {
+    _watched | entr -r $ENTR_FLAGS go run . $SOKKEN_FLAGS server $SERVER_ADDR \
+        $SSH_ADDR
+}
+
+client() {
+    _watched | entr -r $ENTR_FLAGS go run . $SOKKEN_FLAGS client $CLIENT_ADDR \
+        $SSH_ADDR_TUNNEL ws://$SERVER_ADDR/tunnel/$SSH_ADDR \
+        $SSH_HAPROXY_ADDR_TUNNEL ws://$SERVER_HAPROXY_ADDR/tunnel/$SSH_ADDR
+}
+
+tester-helper() {
+    # set -x
+    echo "# ssh"
+    ssh -p $SSH_ADDR_TUNNEL_PORT $SSH_ADDR_TUNNEL_HOST id
+
+    echo "# ssh via haproxy"
+    ssh -p $SSH_HAPROXY_ADDR_TUNNEL_PORT $SSH_HAPROXY_ADDR_TUNNEL_HOST id
+
+    echo "# client health"
+    curl http://$CLIENT_ADDR/health
+
+    echo "# server health"
+    curl http://$SERVER_ADDR/health
+}
+
+tester() {
+    # Sleep to wait for client and server to be running
+    _watched | entr -r $ENTR_FLAGS bash -c "sleep .5; $0 tester-helper"
+}
+
+test-ssh() {
+    ssh -o SendEnv=TMUX -p $SSH_HAPROXY_ADDR_TUNNEL_PORT $SSH_HAPROXY_ADDR_TUNNEL_HOST
+}
+
+cd $(dirname $0)/..
+_function_dispatch "$@"

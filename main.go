@@ -1,37 +1,45 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"path"
 	"syscall"
 	"time"
 
-	"github.com/perpen/sokken/logging"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
 const sokkenSubprotocol = "sokken"
 
+var maxActiveConns int
+
+var activeConns = 0
+
 func main() {
-	log.Logger = *logging.ParseFlags()
-	err := run()
-	if err != nil {
-		log.Fatal().Err(err).Msg("")
-	}
+	maxActiveConnsParam := flag.Int("max-connections", 100,
+		"when reached further connections are rejected")
+	logConfig := newLoggingConfig()
+	flag.Parse()
+	log.Logger = *logConfig.makeLogger()
+	maxActiveConns = *maxActiveConnsParam
+
+	log.Fatal().Err(run()).Msg("")
 }
 
 func run() error {
 	usage := func() {
 		basename := path.Base(os.Args[0])
 		fmt.Fprintf(flag.CommandLine.Output(), ""+
-			"Usage: %v server [OPTION]... LISTEN_ADDR REMOTE_ADDR [REMOTE_ADDR_2...]\n"+
-			"       %v client [OPTION]... LISTEN_ADDR REMOTE_ADDR [LISTEN_ADDR_2 REMOTE_ADDR_2 ...]\n"+
+			"Usage: %v server [OPTION]... API_ADDR REMOTE_ADDR [REMOTE_ADDR_2...]\n"+
+			"       %v client [OPTION]... API_ADDR LOCAL_ADDR REMOTE_ADDR [LOCAL_ADDR_2 REMOTE_ADDR_2 ...]\n"+
 			"Options:\n",
 			basename, basename)
 		flag.PrintDefaults()
@@ -39,38 +47,35 @@ func run() error {
 	}
 
 	args := flag.Args()
-	if len(args) < 3 {
+	if len(args) == 1 {
 		usage()
 	}
 
 	handleSignals()
 
 	if args[0] == "server" {
-		addr := args[1]
-		portArgs := args[2:]
-		localAddrs := make([]string, len(portArgs))
-		for i := range localAddrs {
-			localAddrs[i] = portArgs[i]
+		args = args[1:]
+		if len(args) < 2 {
+			usage()
 		}
-		return runServer(addr, localAddrs)
+		apiAddr := args[0]
+		targetAddrs := args[1:]
+		return runServer(apiAddr, targetAddrs)
 	} else if args[0] == "client" {
+		args = args[1:]
+		if len(args) < 3 {
+			usage()
+		}
+		apiAddr := args[0]
 		args = args[1:]
 		if len(args)%2 != 0 {
 			usage()
 		}
-		clients := make([]sokkenClient, len(args)/2)
-		for i := 0; i < len(args); i += 2 {
-			clt := sokkenClient{
-				args[i],
-				args[i+1],
-			}
-			clients[i/2] = clt
-		}
-		return runClients(clients)
-	} else {
-		usage()
-		return nil
+		return runClient(apiAddr, args)
 	}
+
+	usage()
+	return nil
 }
 
 // experiment
@@ -86,9 +91,10 @@ func handleSignals() {
 	}()
 }
 
-// Pipes the connections
-func plumb(remote, local net.Conn, logger zerolog.Logger) {
-	logger.Info().Msg("plumbing start")
+// Pipes the connections, logs the duration
+func plumb(a, b net.Conn, logger zerolog.Logger) {
+	activeConns += 1
+	logger.Info().Int("active-connections", int(activeConns)).Msg("plumbing start")
 	start := time.Now()
 
 	push := func(tgt, src net.Conn) {
@@ -98,11 +104,33 @@ func plumb(remote, local net.Conn, logger zerolog.Logger) {
 		src.Close()
 		tgt.Close()
 	}
-	go push(remote, local)
-	push(local, remote)
+	go push(a, b)
+	push(b, a)
 
 	elapsed := time.Now().Sub(start)
+	activeConns += -1
 	logger.Info().
+		Int("active-connections", int(activeConns)).
 		Int64("plumbing-duration-ms", elapsed.Milliseconds()).
 		Msgf("plumbing end, lasted %v", elapsed)
+}
+
+// Used by server and client
+func healthEndpoint(w http.ResponseWriter, r *http.Request) {
+	type healthInfo struct {
+		Connections     uint    `json:"connections"`
+		MaxConnections  uint    `json:"max-connections"`
+		PercentCapacity float64 `json:"connections-used-percent"`
+	}
+	info := healthInfo{
+		Connections:     uint(activeConns),
+		MaxConnections:  uint(maxActiveConns),
+		PercentCapacity: float64(activeConns) / float64(maxActiveConns),
+	}
+	infoJson, err := json.MarshalIndent(info, "", "  ")
+	if err != nil {
+		http.Error(w, "unable to marshal health info", 500)
+		return
+	}
+	fmt.Fprintf(w, "%v\n", string(infoJson))
 }

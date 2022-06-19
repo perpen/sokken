@@ -3,70 +3,85 @@ package main
 import (
 	"context"
 	"net"
+	"net/http"
 
 	"github.com/rs/zerolog/log"
 	"nhooyr.io/websocket"
 )
 
-func runClients(clients []sokkenClient) error {
-	errc := make(chan error, 1) // used to detect issue with any client
-	for _, client := range clients {
-		log.Info().Msgf("proxying from %v to %v",
-			client.localAddr, client.remoteAddr)
-		go client.runClient(errc)
-	}
-	err := <-errc
-	return err
-}
-
-type sokkenClient struct {
+type sokkenTunnel struct {
 	localAddr  string
 	remoteAddr string
 }
 
-// Listen on port, pipe connections to a remote websocket.
-// If fatal error, pushes it to channel.
-func (c sokkenClient) runClient(errc chan error) {
-	ln, err := net.Listen("tcp", c.localAddr)
-	if err != nil {
-		errc <- err
+// `args` must be of even length
+func runClient(apiAddr string, args []string) error {
+	log.Info().Msgf("health endpoint listening on %v", apiAddr)
+	log.Info().Msgf("max connections: %v", maxActiveConns)
+
+	tunnels := make([]sokkenTunnel, len(args)/2)
+	for i := 0; i < len(args); i += 2 {
+		tunnel := sokkenTunnel{
+			localAddr:  args[i],
+			remoteAddr: args[i+1],
+		}
+		tunnels[i/2] = tunnel
 	}
+	err := setupPorts(tunnels)
+	if err != nil {
+		return err
+	}
+
+	http.HandleFunc("/health", healthEndpoint)
+	return http.ListenAndServe(apiAddr, nil)
+}
+
+func setupPorts(tunnels []sokkenTunnel) error {
+	for _, tunnel := range tunnels {
+		log.Info().Msgf("tunnelling %v to %v",
+			tunnel.localAddr, tunnel.remoteAddr)
+		ln, err := net.Listen("tcp", tunnel.localAddr)
+		if err != nil {
+			return err
+		}
+		go tunnel.listen(ln)
+	}
+	return nil
+}
+
+// Listen on a local port, pipe connections through a websocket.
+// If unable to accept connection, pushes error to channel.
+func (c sokkenTunnel) listen(ln net.Listener) {
 	for {
 		local, err := ln.Accept()
 		if err != nil {
-			log.Info().Msgf("oops: %v", err)
+			log.Error().Err(err).Msg("Accept error")
 			continue
 		}
-		go c.handleConn(local, c.remoteAddr)
+		if activeConns >= maxActiveConns {
+			log.Error().Msgf("rejecting client since we have %v connections", maxActiveConns)
+			local.Close()
+			return
+		}
+		go c.tunnel(local, c.remoteAddr)
 	}
 }
 
-func (c sokkenClient) handleConn(local net.Conn, remoteAddr string) {
+func (c sokkenTunnel) tunnel(local net.Conn, remoteAddr string) {
 	localAddr := local.RemoteAddr().String()
-
 	logger := log.With().Str("local", localAddr).Str("remote", remoteAddr).Logger()
-	logger.Info().Msgf("proxy request")
+	logger.Info().Msgf("tunnel request")
 
 	ctx := context.Background()
 	remoteWs, _, err := websocket.Dial(ctx, remoteAddr, &websocket.DialOptions{
 		Subprotocols: []string{sokkenSubprotocol},
 	})
 	if err != nil {
-		log.Error().Msgf("Dial error: %v", err)
+		log.Error().Err(err).Msg("Dial error")
 		local.Close()
 		return
 	}
 
 	remote := websocket.NetConn(ctx, remoteWs, websocket.MessageBinary)
 	plumb(remote, local, logger)
-
-	if false {
-		// Not necessary as plumb() closed the NetConn, which caused the websocket
-		// to close.
-		logger.Info().Msg("client: closing websocket")
-		err = remoteWs.Close(websocket.StatusNormalClosure, "")
-		if err != nil {
-			logger.Error().Msgf("%v", err)
-		}
-	}
 }
