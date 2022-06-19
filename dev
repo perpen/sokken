@@ -1,0 +1,50 @@
+#!/bin/bash
+set -ueo pipefail
+
+source _functions
+
+# port 8000 -> ws 8001 -> PORTS
+PORT=8002
+ENTR_FLAGS=-c
+SOKKEN_FLAGS="--log-pretty --log-debug"
+# SOKKEN_FLAGS="--log-debug"
+
+_watched() {
+    ls *.go */*.go
+}
+
+server() {
+    _watched | entr -r $ENTR_FLAGS go run . \
+		$SOKKEN_FLAGS \
+        server localhost:8001 \
+        192.168.1.140:22 \
+        127.0.0.1:$PORT \
+        github.com:443
+}
+
+client() {
+    _watched | entr -r $ENTR_FLAGS bash -c "sleep .5; \
+        go run . \
+        $SOKKEN_FLAGS \
+		client \
+        127.0.0.1:8000 ws://localhost:8001/proxy/127.0.0.1:$PORT \
+        127.0.0.1:7999 ws://localhost:8001/proxy/192.168.1.140:22 \
+        127.0.0.1:7998 ws://localhost:8001/proxy/github.com:443"
+}
+
+suite() {
+    echo "# ssl mismatch, client (curl) will close conn"
+    curl -I https://localhost:7998 || true
+    echo "# server will close conn"
+    curl -0 -kI https://localhost:7998
+    echo "# ssh"
+    ssh -p 7999 127.0.0.1 id
+    echo "# active conns"
+    curl http://localhost:8001/health
+}
+
+tester() {
+    _watched | entr -r $ENTR_FLAGS bash -c "sleep 1; $0 suite"
+}
+
+_function_dispatch "$@"
