@@ -64,11 +64,16 @@ type sokkenServer struct {
 }
 
 func (s sokkenServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Make logger
 	reqTargetAddr := strings.TrimPrefix(r.URL.Path, "/tunnel/")
-	logger := s.log.With().
+	loggerFields := s.log.With().
 		Str("target", reqTargetAddr).
-		Str("client", r.RemoteAddr).
-		Logger()
+		Str("client", r.RemoteAddr)
+	xForwardedFor := r.Header["X-Forwarded-For"]
+	if len(xForwardedFor) > 0 {
+		loggerFields = loggerFields.Str("x-forwarded-for", xForwardedFor[0])
+	}
+	logger := loggerFields.Logger()
 
 	if activeConns >= maxActiveConns {
 		logger.Error().Msgf("rejecting client since we have %v connections", maxActiveConns)

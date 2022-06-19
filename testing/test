@@ -1,0 +1,102 @@
+#!/bin/bash
+# Awful thing
+#
+# Run in 4 windows:
+#   ./dev/test helpers (starts haproxy and web server)
+#   ./dev/test server
+#   ./dev/test client
+#   ./dev/test tester
+
+set -ueo pipefail
+
+source _functions
+
+cd $(dirname $0)/..
+
+# port 8000 -> ws $SERVER_PORT -> PORTS
+SERVER_ADDR=127.0.0.1:8000
+SERVER_HAPROXY_ADDR=127.0.0.1:8001
+
+WEB_ADDR=127.0.0.1:8002
+WEB_ADDR_TUNNEL=127.0.0.1:8003
+
+WEB_HAPROXY_ADDR=127.0.0.1:8004
+WEB_HAPROXY_ADDR_TUNNEL=127.0.0.1:8005
+
+SSH_ADDR=127.0.0.1:22
+SSH_ADDR_TUNNEL_HOST=127.0.0.1
+SSH_ADDR_TUNNEL_PORT=8006
+SSH_ADDR_TUNNEL=$SSH_ADDR_TUNNEL_HOST:$SSH_ADDR_TUNNEL_PORT
+
+SSH_HAPROXY_ADDR_TUNNEL_HOST=127.0.0.1
+SSH_HAPROXY_ADDR_TUNNEL_PORT=8007
+SSH_HAPROXY_ADDR_TUNNEL=$SSH_HAPROXY_ADDR_TUNNEL_HOST:$SSH_HAPROXY_ADDR_TUNNEL_PORT
+
+GITHUB_ADDR=github.com:443
+GITHUB_ADDR_TUNNEL=127.0.0.1:8008
+
+ENTR_FLAGS=-c
+SOKKEN_FLAGS="--log-pretty --log-debug"
+
+_watched() {
+    ls *.go */*.go
+}
+
+run-helpers() {
+    pkill haproxy || true
+    sleep 1
+    haproxy -f testing/haproxy.conf &
+    python -m http.server 8002
+}
+
+helpers() {
+    ls testing/* | entr -c ./testing/test run-helpers
+}
+
+server() {
+    _watched | entr -r $ENTR_FLAGS go run . \
+		$SOKKEN_FLAGS \
+        server $SERVER_ADDR \
+        $WEB_ADDR \
+        $WEB_HAPROXY_ADDR \
+        $SSH_ADDR \
+        $GITHUB_ADDR
+}
+
+client() {
+    _watched | entr -r $ENTR_FLAGS bash -c "sleep .5; \
+        go run . \
+        $SOKKEN_FLAGS \
+		client \
+        $WEB_ADDR_TUNNEL ws://$SERVER_ADDR/tunnel/$WEB_ADDR \
+        $WEB_HAPROXY_ADDR_TUNNEL ws://$SERVER_HAPROXY_ADDR/tunnel/$WEB_ADDR \
+        $SSH_ADDR_TUNNEL ws://$SERVER_ADDR/tunnel/$SSH_ADDR \
+        $SSH_HAPROXY_ADDR_TUNNEL ws://$SERVER_HAPROXY_ADDR/tunnel/$SSH_ADDR \
+        $GITHUB_ADDR_TUNNEL ws://$SERVER_ADDR/tunnel/$GITHUB_ADDR"
+}
+
+suite() {
+    # set -x
+    echo "# local web server"
+    curl -I http://$WEB_ADDR_TUNNEL/testing || true
+    echo "# local web server via haproxy"
+    curl -I http://$WEB_HAPROXY_ADDR_TUNNEL/testing || true
+    echo "# ssl mismatch, client (curl) will close conn"
+    curl -I https://$GITHUB_ADDR_TUNNEL || true
+    echo "# server will close conn"
+    curl -0 -kI https://$GITHUB_ADDR_TUNNEL
+    echo "# ssh"
+    ssh -p $SSH_ADDR_TUNNEL_PORT $SSH_ADDR_TUNNEL_HOST id
+    echo "# ssh via haproxy"
+    ssh -p $SSH_HAPROXY_ADDR_TUNNEL_PORT $SSH_HAPROXY_ADDR_TUNNEL_HOST id
+    echo "# active conns"
+    curl http://$SERVER_ADDR/health
+    echo "# active conns via haproxy"
+    curl http://$SERVER_HAPROXY_ADDR/health
+}
+
+tester() {
+    _watched | entr -r $ENTR_FLAGS bash -c "sleep 1; $0 suite"
+}
+
+_function_dispatch "$@"

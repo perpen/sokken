@@ -86,10 +86,8 @@ $ curl http://machine-b:8000/health
 
 # FIXME
 
+- test suite in container?
 - handle panics with structured logging
 - tls, ca for client
-- test through the d*p proxy, and our haproxy
-- log 'x-forwarded-for' ?
-- access logging?
-- for ease of use in other contexts, optionally proxy all other requests to
-  another server. What real use cases?
+- test through the d*p proxy
+  - works with testing/haproxy.conf
